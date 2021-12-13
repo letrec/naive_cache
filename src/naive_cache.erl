@@ -52,7 +52,7 @@ loop({F, Cached, Pending} = S) ->
                     case ets:lookup(Pending, Key) of
                         [] ->
                             true = ets:insert_new(Pending, {Key, [From]}),
-                            schedule_key_eval(F, Key, self());
+                            eval_key_async(F, Key, self());
                         [{_Key, WaiterPids}] ->
                             ets:insert(Pending, {Key, [From | WaiterPids]})
                     end;
@@ -69,14 +69,12 @@ loop({F, Cached, Pending} = S) ->
             loop(S)
     end.
 
-schedule_key_eval(F, Key, ReplyTo) ->
+eval_key_async(F, Key, ReplyTo) ->
     _Pid = spawn(fun() ->
         try F(Key) of
-            Value -> 
-                ReplyTo ! {key_eval_succeeded, Key, Value}
+            Value    -> ReplyTo ! {key_eval_succeeded, Key, Value}
         catch
-            _Class:Reason:_Stacktrace ->
-                ReplyTo ! {key_eval_failed, Key, Reason}
+            _:Reason -> ReplyTo ! {key_eval_failed, Key, Reason}
         end
     end).
 
