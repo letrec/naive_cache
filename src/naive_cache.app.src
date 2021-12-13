@@ -1,0 +1,13 @@
+{application, naive_cache,
+ [{description, "Naive cache library"},
+  {vsn, "0.0.1"},
+  {registered, []},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {links, []}
+ ]}.
