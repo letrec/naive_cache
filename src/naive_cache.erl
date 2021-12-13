@@ -75,13 +75,14 @@ loop({F, Cached, Pending} = S) ->
             loop(S);
         {getOk, Key, Value} ->
             true = ets:insert_new(Cached, {Key, Value}),
-            [{_Key, WaiterPids}] = ets:lookup(Pending, Key),
-            ets:delete(Pending, Key),
-            foreach(fun(Pid) -> Pid ! {self(), Value} end, reverse(WaiterPids)),
+            notify_waiting_getters(Pending, Key, Value),
             loop(S);
         {getError, Key, Reason} ->
-            [{_Key, WaiterPids}] = ets:lookup(Pending, Key),
-            ets:delete(Pending, Key),
-            foreach(fun(Pid) -> Pid ! {self(), Reason} end, reverse(WaiterPids)),
+            notify_waiting_getters(Pending, Key, Reason),
             loop(S)
     end.
+
+notify_waiting_getters(Pending, Key, Value) ->
+    [{_Key, WaiterPids}] = ets:lookup(Pending, Key),
+    ets:delete(Pending, Key),
+    foreach(fun(Pid) -> Pid ! {self(), Value} end, reverse(WaiterPids)).
