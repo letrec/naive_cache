@@ -15,9 +15,8 @@
 start(F) ->
     Pid = spawn(?MODULE, init, [self(), F]),
     receive
-        {Pid, {?MODULE, Table}} -> Table
-    end,
-    {Pid, Table}.
+        {Pid, {?MODULE, Table}} -> {Pid, Table}
+    end.
 
 stop(Pid) ->
     Pid ! stop,
