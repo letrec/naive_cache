@@ -33,13 +33,11 @@ init(From, F) ->
 get({Server, Table}, Key) ->
     case ets:lookup(Table, Key) of
         [] ->
-            io:format("Value for ~w is not in the cache~n", [Key]),
             Server ! {self(), {eval_key, Key}},
             receive
                 {Server, Value} -> Value
             end;
         [{Key, Value}] ->
-            io:format("Value for ~w is in the cache~n", [Key]),
             Value
     end.
 
@@ -73,14 +71,11 @@ loop({F, Cached, Pending} = S) ->
 
 schedule_key_eval(F, Key, ReplyTo) ->
     _Pid = spawn(fun() ->
-        io:format("Evaluating function at ~w~n", [Key]),
         try F(Key) of
-            Value ->
-                io:format("Evaluated ~w to ~w~n", [Key, Value]),
+            Value -> 
                 ReplyTo ! {key_eval_succeeded, Key, Value}
         catch
             _Class:Reason:_Stacktrace ->
-                io:format("Failed to evaluate ~w due to ~w~n", [Key, Reason]),
                 ReplyTo ! {key_eval_failed, Key, Reason}
         end
     end).
