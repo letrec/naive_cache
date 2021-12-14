@@ -26,8 +26,10 @@
 -opaque naive_cache_ref() :: #naive_cache_ref{}.
 -export_type([naive_cache_ref/0]).
 
+-type fetch() :: fun((any()) -> any()).
+
 -record(state, {
-    f :: fun((any()) -> any()),
+    f :: fetch(),
     cached :: ets:tid(),
     pending :: ets:tid()
 }).
@@ -39,7 +41,7 @@
 -define(eval_time_ix, 3).
 -define(counters_size, 3).
 
--spec start(F :: fun((any()) -> any())) -> naive_cache_ref().
+-spec start(F :: fetch()) -> naive_cache_ref().
 start(F) ->
     Pid = spawn(?MODULE, init, [self(), F]),
     receive
@@ -51,7 +53,7 @@ stop(#naive_cache_ref{server = Pid}) ->
     Pid ! stop,
     ok.
 
--spec init(From :: pid(), F :: fun((any()) -> any())) -> no_return().
+-spec init(From :: pid(), F :: fetch()) -> no_return().
 init(From, F) ->
     Cached = ets:new(cached, [set, protected, {read_concurrency, true}]),
     Pending = ets:new(pending, [set, private]),
@@ -109,7 +111,7 @@ loop(#state{f = F, cached = Cached, pending = Pending} = S) ->
             loop(S)
     end.
 
--spec eval_key_async(F :: fun(), Key :: any(), ReplyTo :: pid()) -> ok.
+-spec eval_key_async(F :: fetch(), Key :: any(), ReplyTo :: pid()) -> ok.
 eval_key_async(F, Key, ReplyTo) ->
     _Pid = spawn(fun() ->
         Start = monotonic_time(),
