@@ -1,4 +1,5 @@
 -module(naive_cache).
+-author("https://github.com/letrec").
 
 -import(lists, [
     foreach/2,

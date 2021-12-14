@@ -9,5 +9,6 @@
   {env,[]},
   {modules, []},
 
-  {links, []}
+  {links, []},
+  {links, [{"GitHub", "https://github.com/letrec/naive_cache"}]}
  ]}.
