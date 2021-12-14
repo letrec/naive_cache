@@ -23,7 +23,7 @@
     table :: ets:tid()
 }).
 
--type naive_cache_ref() :: #naive_cache_ref{}.
+-opaque naive_cache_ref() :: #naive_cache_ref{}.
 -export_type([naive_cache_ref/0]).
 
 -record(state, {
@@ -46,8 +46,8 @@ start(F) ->
         {Pid, {?MODULE, Table}} -> #naive_cache_ref{server = Pid, table = Table}
     end.
 
--spec stop(Pid :: pid()) -> ok.
-stop(Pid) ->
+-spec stop(Ref :: naive_cache_ref()) -> ok.
+stop(#naive_cache_ref{server = Pid}) ->
     Pid ! stop,
     ok.
 
@@ -60,7 +60,7 @@ init(From, F) ->
 
     loop(#state{f = F, cached = Cached, pending = Pending}).
 
--spec get(Config :: naive_cache_ref(), Key :: any()) -> any().
+-spec get(Ref :: naive_cache_ref(), Key :: any()) -> any().
 get(#naive_cache_ref{server = Server, table = Table}, Key) ->
     case ets:lookup(Table, Key) of
         [] ->
@@ -73,7 +73,7 @@ get(#naive_cache_ref{server = Server, table = Table}, Key) ->
             Value
     end.
 
--spec loop(State :: state()) -> ok | none().
+-spec loop(State :: state()) -> ok | no_return().
 loop(#state{f = F, cached = Cached, pending = Pending} = S) ->
     receive
         stop ->
