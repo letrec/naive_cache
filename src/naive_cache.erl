@@ -27,7 +27,7 @@
 -export_type([naive_cache_ref/0]).
 
 -record(state, {
-    f :: fun(),
+    f :: fun((any()) -> any()),
     cached :: ets:tid(),
     pending :: ets:tid()
 }).
