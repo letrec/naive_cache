@@ -36,10 +36,10 @@
 
 -type state() :: #state{}.
 
+-define(counters_size, 3).
 -define(hit_ix, 1).
 -define(miss_ix, 2).
 -define(eval_time_ix, 3).
--define(counters_size, 3).
 
 -spec start(F :: fetch()) -> naive_cache_ref().
 start(F) ->
