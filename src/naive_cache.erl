@@ -51,7 +51,7 @@ stop(#naive_cache_ref{server = Pid}) ->
     Pid ! stop,
     ok.
 
--spec init(From :: pid(), F :: fun()) -> none().
+-spec init(From :: pid(), F :: fun((any()) -> any())) -> no_return().
 init(From, F) ->
     Cached = ets:new(cached, [set, protected, {read_concurrency, true}]),
     Pending = ets:new(pending, [set, private]),
