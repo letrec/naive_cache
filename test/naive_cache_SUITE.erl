@@ -1,4 +1,5 @@
 -module(naive_cache_SUITE).
+-author("https://github.com/letrec").
 
 -include_lib("stdlib/include/assert.hrl").
 
