@@ -43,7 +43,7 @@
 start(F) ->
     Pid = spawn(?MODULE, init, [self(), F]),
     receive
-        {Pid, {?MODULE, Table}} -> {Pid, Table}
+        {Pid, {?MODULE, Table}} -> #naive_cache_ref{server = Pid, table = Table}
     end.
 
 -spec stop(Pid :: pid()) -> ok.
