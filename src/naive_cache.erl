@@ -1,7 +1,12 @@
 -module(naive_cache).
 -author("https://github.com/letrec").
 
+-import(erlang, [
+    monotonic_time/0
+]).
+
 -import(lists, [
+    foldr/3,
     foreach/2,
     reverse/1
 ]).
@@ -13,36 +18,65 @@
     get/2
 ]).
 
+-record(naive_cache_ref, {
+    server :: pid(),
+    table :: ets:tid()
+}).
+
+-opaque naive_cache_ref() :: #naive_cache_ref{}.
+-export_type([naive_cache_ref/0]).
+
+-type fetch() :: fun((any()) -> any()).
+
+-record(state, {
+    f :: fetch(),
+    cached :: ets:tid(),
+    pending :: ets:tid()
+}).
+
+-type state() :: #state{}.
+
+-define(counters_size, 3).
+-define(hit_ix, 1).
+-define(miss_ix, 2).
+-define(eval_time_ix, 3).
+
+-spec start(F :: fetch()) -> naive_cache_ref().
 start(F) ->
     Pid = spawn(?MODULE, init, [self(), F]),
     receive
-        {Pid, {?MODULE, Table}} -> {Pid, Table}
+        {Pid, {?MODULE, Table}} -> #naive_cache_ref{server = Pid, table = Table}
     end.
 
-stop(Pid) ->
+-spec stop(Ref :: naive_cache_ref()) -> ok.
+stop(#naive_cache_ref{server = Pid}) ->
     Pid ! stop,
     ok.
 
+-spec init(From :: pid(), F :: fetch()) -> no_return().
 init(From, F) ->
     Cached = ets:new(cached, [set, protected, {read_concurrency, true}]),
     Pending = ets:new(pending, [set, private]),
 
     From ! {self(), {?MODULE, Cached}},
 
-    loop({F, Cached, Pending}).
+    loop(#state{f = F, cached = Cached, pending = Pending}).
 
-get({Server, Table}, Key) ->
+-spec get(Ref :: naive_cache_ref(), Key :: any()) -> any().
+get(#naive_cache_ref{server = Server, table = Table}, Key) ->
     case ets:lookup(Table, Key) of
         [] ->
             Server ! {self(), {eval_key, Key}},
             receive
                 {Server, Value} -> Value
             end;
-        [{Key, Value}] ->
+        [{Key, Value, Counters}] ->
+            counters:add(Counters, ?hit_ix, 1),
             Value
     end.
 
-loop({F, Cached, Pending} = S) ->
+-spec loop(State :: state()) -> ok | no_return().
+loop(#state{f = F, cached = Cached, pending = Pending} = S) ->
     receive
         stop ->
             ok;
@@ -57,29 +91,46 @@ loop({F, Cached, Pending} = S) ->
                         [{_Key, WaiterPids}] ->
                             ets:insert(Pending, {Key, [From | WaiterPids]})
                     end;
-                [{Key, Value}] ->
+                [{Key, Value, Counters}] ->
+                    atomics:add(Counters, ?hit_ix, 1),
                     From ! {self(), Value}
             end,
             loop(S);
-        {key_eval_succeeded, Key, Value} ->
-            true = ets:insert_new(Cached, {Key, Value}),
-            notify_waiting_getters(Pending, Key, Value),
+        {key_eval_succeeded, Key, Value, EvalTime} ->
+            Counters = counters:new(?counters_size, [write_concurrency]),
+            counters:add(Counters, ?eval_time_ix, EvalTime),
+
+            true = ets:insert_new(Cached, {Key, Value, Counters}),
+
+            WaiterCount = notify_waiting_getters(Pending, Key, Value),
+            counters:add(Counters, ?miss_ix, WaiterCount),
+
             loop(S);
         {key_eval_failed, Key, Reason} ->
             notify_waiting_getters(Pending, Key, Reason),
             loop(S)
     end.
 
+-spec eval_key_async(F :: fetch(), Key :: any(), ReplyTo :: pid()) -> ok.
 eval_key_async(F, Key, ReplyTo) ->
     _Pid = spawn(fun() ->
+        Start = monotonic_time(),
         try F(Key) of
-            Value    -> ReplyTo ! {key_eval_succeeded, Key, Value}
+            Value    -> ReplyTo ! {key_eval_succeeded, Key, Value, monotonic_time() - Start}
         catch
             _:Reason -> ReplyTo ! {key_eval_failed, Key, Reason}
         end
-    end).
+    end),
+    ok.
 
+-spec notify_waiting_getters(Pending :: ets:tid(), Key :: any(), Value :: any()) -> integer().
 notify_waiting_getters(Pending, Key, Value) ->
     [{_Key, WaiterPids}] = ets:lookup(Pending, Key),
     ets:delete(Pending, Key),
-    foreach(fun(Pid) -> Pid ! {self(), Value} end, reverse(WaiterPids)).
+    foldr(
+        fun(Pid, Count) ->
+            Pid ! {self(), Value},
+            Count + 1
+        end,
+        0,
+        reverse(WaiterPids)).
