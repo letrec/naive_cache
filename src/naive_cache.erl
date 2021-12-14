@@ -39,7 +39,7 @@
 -define(eval_time_ix, 3).
 -define(counters_size, 3).
 
--spec start(F :: fun()) -> naive_cache_ref().
+-spec start(F :: fun((any()) -> any())) -> naive_cache_ref().
 start(F) ->
     Pid = spawn(?MODULE, init, [self(), F]),
     receive
