@@ -1,19 +1,21 @@
 -module(naive_cache).
 
+-include_lib("stdlib/include/ms_transform.hrl").
+
 -import(lists, [
     foreach/2,
     reverse/1
 ]).
 
 -export([
-    start/1,
+    start/0,
     stop/1,
-    init/2,
-    get/2
+    init/1,
+    get/3
 ]).
 
-start(F) ->
-    Pid = spawn(?MODULE, init, [self(), F]),
+start() ->
+    Pid = spawn(?MODULE, init, [self()]),
     receive
         {Pid, {?MODULE, Table}} -> {Pid, Table}
     end.
@@ -22,63 +24,78 @@ stop(Pid) ->
     Pid ! stop,
     ok.
 
-init(From, F) ->
-    Cached = ets:new(cached, [set, protected, {read_concurrency, true}]),
-    Pending = ets:new(pending, [set, private]),
-
+init(From) ->
+    Cached = ets:new(cached, [set, public, {read_concurrency, true}, {write_concurrency, true}]),
     From ! {self(), {?MODULE, Cached}},
+    loop().
 
-    loop({F, Cached, Pending}).
+% key states: not present, being fetched, present
 
-get({Server, Table}, Key) ->
-    case ets:lookup(Table, Key) of
+eval_key(Tid, Fun, Key, Pid) ->
+    Eval = fun() ->
+        try Fun(Key) of
+            Val -> eval_succeeded(Tid, Fun, Key, Val, Pid)
+        catch
+            _:Reason -> eval_failed(Tid, Fun, Key, Reason, Pid)
+        end
+    end,
+    spawn(Eval).
+
+register_first_waiter(Tid, Fun, Key, Pid) ->
+    case ets:insert_new(Tid, {Key, wait, [Pid]}) of
+        true  -> eval_key(Tid, Fun, Key, Pid);
+        false -> register_additional_waiter(Tid, Fun, Key, Pid)
+    end.
+
+register_additional_waiter(Tid, Fun, Key, Pid) ->
+    case ets:lookup(Tid, Key) of
+        % the value is here and there's no need to wait anymore
+        [{_key, value, Val}] -> Pid ! {ok, Val};
+        % previous attempt failed, failures are not cached, so we need to rey again
+        [] -> register_first_waiter(Tid, Fun, Key, Pid);
+        [{_key, wait, Pids}] ->
+            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, wait, [Pid | Ps]} end),
+            case ets:select_replace(Tid, ReplaceMS) of
+                1 -> ok;
+                0 -> register_additional_waiter(Tid, Fun, Key, Pid)
+            end
+    end.
+
+eval_succeeded(Tid, Fun, Key, Val, Pid) ->
+    case ets:lookup(Tid, Key) of
+        [{_key, wait, Pids}] ->
+            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, value, Val} end),
+            case ets:select_replace(Tid, ReplaceMS) of
+                1 -> foreach(fun(P) -> P ! {ok, Val} end, reverse(Pids));
+                0 -> eval_succeeded(Tid, Fun, Key, Val, Pid)
+            end
+    end.
+
+eval_failed(Tid, Fun, Key, Reason, Pid) ->
+    case ets:lookup(Tid, Key) of
+        [{_key, wait, Pids}] ->
+            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) -> K =:= Key andalso Ps =:= Pids end),
+            case ets:select_delete(Tid, ReplaceMS) of
+                1 -> foreach(fun(P) -> P ! {error, Reason} end, reverse(Pids));
+                0 -> eval_failed(Tid, Fun, Key, Reason, Pid)
+            end
+    end.
+
+get(Tid, Fun, Key) ->
+    case ets:lookup(Tid, Key) of
         [] ->
-            Server ! {self(), {eval_key, Key}},
+            register_first_waiter(Tid, Fun, Key, self()),
             receive
-                {Server, Value} -> Value
+                {ok, Value}     -> Value;
+                {error, Reason} -> throw(Reason)
             end;
-        [{Key, Value}] ->
+        [{_key, wait, _pids}] ->
+            register_additional_waiter(Tid, Fun, Key, self());
+        [{_key, value, Value}] ->
             Value
     end.
 
-loop({F, Cached, Pending} = S) ->
+loop() ->
     receive
-        stop ->
-            ok;
-        {From, {eval_key, Key}} ->
-            case ets:lookup(Cached, Key) of
-                [] ->
-                    % TODO: consider using `ets:select_replace` instead of `ets:lookup`
-                    case ets:lookup(Pending, Key) of
-                        [] ->
-                            true = ets:insert_new(Pending, {Key, [From]}),
-                            eval_key_async(F, Key, self());
-                        [{_Key, WaiterPids}] ->
-                            ets:insert(Pending, {Key, [From | WaiterPids]})
-                    end;
-                [{Key, Value}] ->
-                    From ! {self(), Value}
-            end,
-            loop(S);
-        {key_eval_succeeded, Key, Value} ->
-            true = ets:insert_new(Cached, {Key, Value}),
-            notify_waiting_getters(Pending, Key, Value),
-            loop(S);
-        {key_eval_failed, Key, Reason} ->
-            notify_waiting_getters(Pending, Key, Reason),
-            loop(S)
+        stop -> ok
     end.
-
-eval_key_async(F, Key, ReplyTo) ->
-    _Pid = spawn(fun() ->
-        try F(Key) of
-            Value    -> ReplyTo ! {key_eval_succeeded, Key, Value}
-        catch
-            _:Reason -> ReplyTo ! {key_eval_failed, Key, Reason}
-        end
-    end).
-
-notify_waiting_getters(Pending, Key, Value) ->
-    [{_Key, WaiterPids}] = ets:lookup(Pending, Key),
-    ets:delete(Pending, Key),
-    foreach(fun(Pid) -> Pid ! {self(), Value} end, reverse(WaiterPids)).

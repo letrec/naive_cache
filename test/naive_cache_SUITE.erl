@@ -5,18 +5,25 @@
 -compile(export_all).
 -compile(nowarn_export_all).
 
+id(X) ->
+    X.
+
+div_by_zero(X) ->
+    X / 0.
+
 start_stop_test() ->
-    {Pid, _Table} = naive_cache:start(fun(X) -> X end),
+    {Pid, _Tid} = naive_cache:start(),
     ok = naive_cache:stop(Pid).
 
 get_test() ->
-    {Pid, Table} = naive_cache:start(fun(X) -> X end),
-    ?assertEqual(42, naive_cache:get({Pid, Table}, 42)),
-    ?assertEqual(42, naive_cache:get({Pid, Table}, 42)),
+    {Pid, Tid} = naive_cache:start(),
+    naive_cache:get(Tid, fun(X) -> X end, 42),
+    ?assertEqual(42, naive_cache:get(Tid, fun id/1, 42)),
+    ?assertEqual(42, naive_cache:get(Tid, fun id/1, 42)),
     ok = naive_cache:stop(Pid).
 
 get_failed_test() ->
-    {Pid, Table} = naive_cache:start(fun(X) -> X / 0 end),
-    ?assertEqual(badarith, naive_cache:get({Pid, Table}, 42)),
-    ?assertEqual(badarith, naive_cache:get({Pid, Table}, 42)),
+    {Pid, Tid} = naive_cache:start(),
+    ?assertThrow(badarith, naive_cache:get(Tid, fun div_by_zero/1, 42)),
+    ?assertThrow(badarith, naive_cache:get(Tid, fun div_by_zero/1, 42)),
     ok = naive_cache:stop(Pid).
