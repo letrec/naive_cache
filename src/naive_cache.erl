@@ -54,8 +54,8 @@ register_additional_waiter(Tid, Fun, Key, Pid) ->
         % previous attempt failed, failures are not cached, so we need to rey again
         [] -> register_first_waiter(Tid, Fun, Key, Pid);
         [{_key, wait, Pids}] ->
-            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, wait, [Pid | Ps]} end),
-            case ets:select_replace(Tid, ReplaceMS) of
+            MS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, wait, [Pid | Ps]} end),
+            case ets:select_replace(Tid, MS) of
                 1 -> ok;
                 0 -> register_additional_waiter(Tid, Fun, Key, Pid)
             end
@@ -64,8 +64,8 @@ register_additional_waiter(Tid, Fun, Key, Pid) ->
 eval_succeeded(Tid, Fun, Key, Val, Pid) ->
     case ets:lookup(Tid, Key) of
         [{_key, wait, Pids}] ->
-            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, value, Val} end),
-            case ets:select_replace(Tid, ReplaceMS) of
+            MS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, value, Val} end),
+            case ets:select_replace(Tid, MS) of
                 1 -> foreach(fun(P) -> P ! {ok, Val} end, reverse(Pids));
                 0 -> eval_succeeded(Tid, Fun, Key, Val, Pid)
             end
@@ -74,8 +74,8 @@ eval_succeeded(Tid, Fun, Key, Val, Pid) ->
 eval_failed(Tid, Fun, Key, Reason, Pid) ->
     case ets:lookup(Tid, Key) of
         [{_key, wait, Pids}] ->
-            ReplaceMS = ets:fun2ms(fun({K, wait, Ps}) -> K =:= Key andalso Ps =:= Pids end),
-            case ets:select_delete(Tid, ReplaceMS) of
+            MS = ets:fun2ms(fun({K, wait, Ps}) -> K =:= Key andalso Ps =:= Pids end),
+            case ets:select_delete(Tid, MS) of
                 1 -> foreach(fun(P) -> P ! {error, Reason} end, reverse(Pids));
                 0 -> eval_failed(Tid, Fun, Key, Reason, Pid)
             end
