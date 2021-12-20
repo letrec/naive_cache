@@ -51,7 +51,7 @@ register_additional_waiter(Tid, Fun, Key, Pid) ->
     case ets:lookup(Tid, Key) of
         % the value is here and there's no need to wait anymore
         [{_key, value, Val}] -> Pid ! {ok, Val};
-        % previous attempt failed, failures are not cached, so we need to rey again
+        % previous attempt failed, failures are not cached, so we need to try again
         [] -> register_first_waiter(Tid, Fun, Key, Pid);
         [{_key, wait, Pids}] ->
             MS = ets:fun2ms(fun({K, wait, Ps}) when K =:= Key, Ps =:= Pids -> {K, wait, [Pid | Ps]} end),
@@ -83,6 +83,8 @@ eval_failed(Tid, Fun, Key, Reason, Pid) ->
 
 get(Tid, Fun, Key) ->
     case ets:lookup(Tid, Key) of
+        [{_key, value, Value}] ->
+            Value;
         [] ->
             register_first_waiter(Tid, Fun, Key, self()),
             receive
@@ -90,9 +92,11 @@ get(Tid, Fun, Key) ->
                 {error, Reason} -> throw(Reason)
             end;
         [{_key, wait, _pids}] ->
-            register_additional_waiter(Tid, Fun, Key, self());
-        [{_key, value, Value}] ->
-            Value
+            register_additional_waiter(Tid, Fun, Key, self()),
+            receive
+                {ok, Value}     -> Value;
+                {error, Reason} -> throw(Reason)
+            end
     end.
 
 loop() ->
