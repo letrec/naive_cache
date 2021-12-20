@@ -25,8 +25,8 @@ stop(Pid) ->
     ok.
 
 init(From) ->
-    Cached = ets:new(cached, [set, public, {read_concurrency, true}, {write_concurrency, true}]),
-    From ! {self(), {?MODULE, Cached}},
+    Cache = ets:new(cache, [set, public, {read_concurrency, true}, {write_concurrency, true}]),
+    From ! {self(), {?MODULE, Cache}},
     loop().
 
 % key states: not present, being fetched, present
